@@ -58,6 +58,7 @@ namespace Movement
         bool walk;
         bool HasVelocity;
         bool TransformForTransport;
+        uint32 enforcedDuration;
 
         /** Returns true to show that the arguments were configured correctly and MoveSpline initialization will succeed. */
         bool Validate(Unit* unit) const;

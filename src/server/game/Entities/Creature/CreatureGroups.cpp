@@ -22,6 +22,7 @@
 #include "Log.h"
 #include "Map.h"
 #include "MotionMaster.h"
+#include "MovementGenerator.h"
 #include "ObjectMgr.h"
 
 #define MAX_DESYNC 5.0f
@@ -245,23 +246,9 @@ void CreatureGroup::LeaderMoveTo(Position destination, uint32 id /*= 0*/, uint32
             if (m_leader->GetCurrentWaypointInfo().first == itr->second->point_1 || m_leader->GetCurrentWaypointInfo().first == itr->second->point_2)
                 itr->second->follow_angle = float(M_PI) * 2 - itr->second->follow_angle;
 
-        float angle = itr->second->follow_angle;
-        float dist = itr->second->follow_dist;
-
-        float dx = x + std::cos(angle + pathangle) * dist;
-        float dy = y + std::sin(angle + pathangle) * dist;
-        float dz = z;
-
-        Trinity::NormalizeMapCoord(dx);
-        Trinity::NormalizeMapCoord(dy);
-
-        if (!member->IsFlying())
-            member->UpdateGroundPositionZ(dx, dy, dz);
-
-        Position point(dx, dy, dz, destination.GetOrientation());
-
-        member->GetMotionMaster()->MoveFormation(id, point, moveType, !member->IsWithinDist(m_leader, dist + MAX_DESYNC), orientation);
-        member->SetHomePosition(dx, dy, dz, pathangle);
+        if (MovementGenerator* gen = member->GetMotionMaster()->GetMotionSlot(MOTION_SLOT_IDLE))
+            if (gen->GetMovementGeneratorType() != FORMATION_MOTION_TYPE)
+                member->GetMotionMaster()->MoveFormation(m_leader, itr->second->follow_angle, itr->second->follow_dist);
     }
 }
 

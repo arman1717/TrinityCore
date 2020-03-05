@@ -20,10 +20,17 @@
 #include "MoveSplineInit.h"
 #include "MoveSpline.h"
 #include "FormationMovementGenerator.h"
+#include "G3DPosition.hpp"
 
-void FormationMovementGenerator::DoInitialize(Creature* owner)
+FormationMovementGenerator::FormationMovementGenerator(Unit* formationLeader, float angle, float distance)
+    : AbstractFollower(ASSERT_NOTNULL(formationLeader)), _interrupt(false), _formationMoveInterval(100), _formationAngle(angle), _formationDistance(distance) { }
+
+FormationMovementGenerator::~FormationMovementGenerator() = default;
+
+void FormationMovementGenerator::Initialize(Unit* owner)
 {
     owner->AddUnitState(UNIT_STATE_ROAMING);
+    _lastLeaderPosition.reset();
 
     if (owner->HasUnitState(UNIT_STATE_NOT_MOVE) || owner->IsMovementPreventedByCasting())
     {
@@ -33,39 +40,23 @@ void FormationMovementGenerator::DoInitialize(Creature* owner)
     }
 
     owner->AddUnitState(UNIT_STATE_ROAMING_MOVE);
-
-    Movement::MoveSplineInit init(owner);
-    init.MoveTo(_destination.GetPositionX(), _destination.GetPositionY(), _destination.GetPositionZ());
-    if (_orientation)
-        init.SetFacing(_destination.GetOrientation());
-
-    switch (_moveType)
-    {
-        case 2: // WAYPOINT_MOVE_TYPE_LAND
-            init.SetAnimation(Movement::ToGround);
-            break;
-        case 3: // WAYPOINT_MOVE_TYPE_TAKEOFF
-            init.SetAnimation(Movement::ToFly);
-            break;
-        case 1: // WAYPOINT_MOVE_TYPE_RUN
-            init.SetWalk(false);
-            break;
-        case 0: // WAYPOINT_MOVE_TYPE_WALK
-            init.SetWalk(true);
-            break;
-    }
-
-    if (_run)
-        init.SetWalk(false);
-
-    init.Launch();
 }
 
-bool FormationMovementGenerator::DoUpdate(Creature* owner, uint32 /*diff*/)
+bool FormationMovementGenerator::Update(Unit* owner, uint32 diff)
 {
+    // nullptr protects
     if (!owner)
         return false;
 
+    // we are in combat, we will re-initialize a new formation movement when we are done
+    if (owner->IsInCombat())
+        return false;
+
+    // formation target might have gone
+    if (!GetTarget() || !GetTarget()->IsInWorld())
+        return false;
+
+    // our formation member is unable to move
     if (owner->HasUnitState(UNIT_STATE_NOT_MOVE) || owner->IsMovementPreventedByCasting())
     {
         _interrupt = true;
@@ -73,58 +64,78 @@ bool FormationMovementGenerator::DoUpdate(Creature* owner, uint32 /*diff*/)
         return true;
     }
 
-    if ((_interrupt && owner->movespline->Finalized()) || (_recalculateSpeed && !owner->movespline->Finalized()))
+    // update interrupt state
+    if ((_interrupt && owner->movespline->Finalized()) || !owner->movespline->Finalized())
     {
-        _recalculateSpeed = false;
         _interrupt = false;
-
         owner->AddUnitState(UNIT_STATE_ROAMING_MOVE);
-
-        Movement::MoveSplineInit init(owner);
-        init.MoveTo(_destination.GetPositionX(), _destination.GetPositionY(), _destination.GetPositionZ());
-        if (_orientation)
-            init.SetFacing(_destination.GetOrientation());
-
-        switch (_moveType)
-        {
-            case 2: // WAYPOINT_MOVE_TYPE_LAND
-                init.SetAnimation(Movement::ToGround);
-                break;
-            case 3: // WAYPOINT_MOVE_TYPE_TAKEOFF
-                init.SetAnimation(Movement::ToFly);
-                break;
-            case 1: // WAYPOINT_MOVE_TYPE_RUN
-                init.SetWalk(false);
-                break;
-            case 0: // WAYPOINT_MOVE_TYPE_WALK
-                init.SetWalk(true);
-                break;
-        }
-
-        if (_run)
-            init.SetWalk(false);
-        init.Launch();
     }
 
-    return !owner->movespline->Finalized();
+    // trigger next formation follow movement
+    _formationMoveInterval -= diff;
+    if (!_interrupt && _formationMoveInterval <= 0)
+        if (GetTarget()->GetPosition() != _lastLeaderPosition.get())
+            LaunchSplineMovement(owner);
+
+    _lastLeaderPosition = GetTarget()->GetPosition();
+
+    if (_formationMoveInterval <= 0)
+        _formationMoveInterval = FORMATION_MOVE_INTERVAL;
+
+    return true;
 }
 
-void FormationMovementGenerator::DoFinalize(Creature* owner)
+void FormationMovementGenerator::Finalize(Unit* owner)
 {
     owner->ClearUnitState(UNIT_STATE_ROAMING | UNIT_STATE_ROAMING_MOVE);
-
-    if (owner->movespline->Finalized())
-        MovementInform(owner);
 }
 
-void FormationMovementGenerator::DoReset(Creature* owner)
+void FormationMovementGenerator::Reset(Unit* owner)
 {
     owner->StopMoving();
-    DoInitialize(owner);
+    Initialize(owner);
 }
 
-void FormationMovementGenerator::MovementInform(Creature* owner)
+void FormationMovementGenerator::MovementInform(Unit* owner)
 {
-    if (owner->AI())
-        owner->AI()->MovementInform(FORMATION_MOTION_TYPE, _movementId);
+}
+
+void FormationMovementGenerator::LaunchSplineMovement(Unit* owner)
+{
+    Unit* leader = GetTarget();
+
+    // First we calculate our destination
+
+    Position dest = leader->GetPosition();
+    if (!leader->movespline->Finalized())
+        dest = Vector3ToPosition(leader->movespline->FinalDestination());
+
+    float angle = leader->GetAngle(dest);
+    dest.m_positionX += std::cos(angle + _formationAngle) * _formationDistance;
+    dest.m_positionY += std::sin(angle + _formationAngle) * _formationDistance;
+
+    // Normalize offsets
+    Trinity::NormalizeMapCoord(dest.m_positionX);
+    Trinity::NormalizeMapCoord(dest.m_positionY);
+    if (!owner->IsFlying())
+        owner->UpdateGroundPositionZ(dest.GetPositionX(), dest.GetPositionY(), dest.m_positionZ);
+
+    // Now we update our home position
+    if (owner->IsCreature())
+        owner->ToCreature()->SetHomePosition(dest);
+
+    // Preparing spline
+    Movement::MoveSplineInit init(owner);
+    init.MoveTo(dest.GetPositionX(), dest.GetPositionY(), dest.GetPositionZ());
+
+    // Determining our spline duration
+    if (leader->movespline->Finalized())
+        init.SetVelocity(owner->GetSpeed(MOVE_WALK));
+    else if (owner->GetExactDist(dest) > 1.f)
+    {
+        uint32 length = std::min<uint32>(leader->movespline->RemainingTime(), FORMATION_SPLINE_DURATION);
+        init.SetEnforcedLength(length);
+    }
+
+    init.Launch();
 }

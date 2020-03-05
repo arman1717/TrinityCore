@@ -18,32 +18,37 @@
 #ifndef TRINITY_FORMATIONMOVEMENTGENERATOR_H
 #define TRINITY_FORMATIONMOVEMENTGENERATOR_H
 
+#include "AbstractFollower.h"
 #include "MovementGenerator.h"
+#include "Optional.h"
 
-class FormationMovementGenerator : public MovementGeneratorMedium< Creature, FormationMovementGenerator >
+class Unit;
+
+#define FORMATION_MOVE_INTERVAL 1200 // sniffed
+#define FORMATION_SPLINE_DURATION 1650 // sniffed
+
+class FormationMovementGenerator : public MovementGenerator, public AbstractFollower
 {
     public:
-        explicit FormationMovementGenerator(uint32 id, Position destination, uint32 moveType, bool run, bool orientation) : _movementId(id), _destination(destination), _moveType(moveType), _run(run), _orientation(orientation), _recalculateSpeed(false), _interrupt(false) { }
-
         MovementGeneratorType GetMovementGeneratorType() const override { return FORMATION_MOTION_TYPE; }
 
-        void DoInitialize(Creature*);
-        void DoFinalize(Creature*);
-        void DoReset(Creature*);
-        bool DoUpdate(Creature*, uint32);
+        FormationMovementGenerator(Unit* formationLeader, float angle, float distance);
+        ~FormationMovementGenerator();
 
-        void UnitSpeedChanged() override { _recalculateSpeed = true; }
+        void Initialize(Unit* owner) override;
+        void Finalize(Unit* owner) override;
+        void Reset(Unit* owner) override;
+        bool Update(Unit* owner, uint32 diff) override;
 
     private:
-        void MovementInform(Creature*);
+        void MovementInform(Unit* owner);
+        void LaunchSplineMovement(Unit* owner);
 
-        uint32 _movementId;
-        Position _destination;
-        uint32 _moveType;
-        bool _run;
-        bool _orientation;
-        bool _recalculateSpeed;
         bool _interrupt;
+        int32 _formationMoveInterval;
+        float _formationAngle;
+        float _formationDistance;
+        Optional<Position> _lastLeaderPosition;
 };
 
 #endif // TRINITY_FORMATIONMOVEMENTGENERATOR_H

@@ -154,6 +154,11 @@ namespace Movement
         /* Disables transport coordinate transformations for cases where raw offsets are available
         */
         void DisableTransportPathTransformations();
+
+        /* Enforces the spline to have a fixed duration when launched
+        */
+        void SetEnforcedLength(uint32 length);
+
     protected:
 
         MoveSplineInitArgs args;
@@ -170,6 +175,7 @@ namespace Movement
     inline void MoveSplineInit::SetTransportEnter() { args.flags.EnableTransportEnter(); }
     inline void MoveSplineInit::SetTransportExit() { args.flags.EnableTransportExit(); }
     inline void MoveSplineInit::SetOrientationFixed(bool enable) { args.flags.orientationFixed = enable; }
+    inline void MoveSplineInit::SetEnforcedLength(uint32 length) { args.enforcedDuration = length; }
 
     inline void MoveSplineInit::SetParabolic(float amplitude, float time_shift)
     {

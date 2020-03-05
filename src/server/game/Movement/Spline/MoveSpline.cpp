@@ -141,6 +141,19 @@ void MoveSpline::init_spline(MoveSplineInitArgs const& args)
         spline.initLengths(init);
     }
 
+    // adjust duration to get a enforced spline duration
+    if (args.enforcedDuration > 0 && spline.length() > 100)
+    {
+        int32 totalLength = spline.length();
+        for (int32 i = spline.first() + 1; i <= spline.last(); ++i)
+        {
+            int32 length = spline.length(i);
+            float pct = (float)length / totalLength;
+
+            spline.set_length(i, std::max<int32>(int32(args.enforcedDuration * pct), minimal_duration));
+        }
+    }
+
     /// @todo what to do in such cases? problem is in input data (all points are at same coords)
     if (spline.length() < minimal_duration)
     {
@@ -192,8 +205,8 @@ MoveSpline::MoveSpline() : m_Id(0), time_passed(0),
 }
 
 MoveSplineInitArgs::MoveSplineInitArgs(size_t path_capacity /*= 16*/) : path_Idx_offset(0), velocity(0.f),
-parabolic_amplitude(0.f), time_perc(0.f), splineId(0), initialOrientation(0.f),
-HasVelocity(false), TransformForTransport(true)
+parabolic_amplitude(0.f), time_perc(0.f), splineId(0), initialOrientation(0.f), walk(false),
+HasVelocity(false), TransformForTransport(true), enforcedDuration(0)
 {
     path.reserve(path_capacity);
 }
