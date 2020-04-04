@@ -41,6 +41,7 @@
 #include "LootMgr.h"
 #include "MotionMaster.h"
 #include "MovementGenerator.h"
+#include "MovementPackets.h"
 #include "MovementPacketBuilder.h"
 #include "MovementStructures.h"
 #include "MoveSpline.h"
@@ -869,6 +870,7 @@ uint32 Unit::DealDamage(Unit* victim, uint32 damage, CleanDamage const* cleanDam
         {
             case OFF_ATTACK:
                 rage /= 2;
+                [[fallthrough]];
             case BASE_ATTACK:
                 RewardRage(rage, true);
                 break;
@@ -2122,13 +2124,13 @@ void Unit::AttackerStateUpdate(Unit* victim, WeaponAttackType attType, bool extr
         {
             auto itr = std::find_if(meleeAttackOverrides.begin(), meleeAttackOverrides.end(), [&](AuraEffect const* aurEff)
             {
-                return aurEff->GetMiscValue() != 0;
+                return aurEff->GetAmount() != 0;
             });
 
             if (itr != meleeAttackOverrides.end())
             {
                 meleeAttackAuraEffect = *itr;
-                meleeAttackSpellId = meleeAttackAuraEffect->GetMiscValue();
+                meleeAttackSpellId = meleeAttackAuraEffect->GetAmount();
             }
         }
 
@@ -6899,7 +6901,7 @@ float Unit::SpellDamagePctDone(Unit* victim, SpellInfo const* spellProto, Damage
     }
 
     // Add SPELL_AURA_MOD_DAMAGE_FROM_MANA percent bonus
-    if (int32 mana = GetPower(POWER_MANA))
+    if (getPowerType() == POWER_MANA)
     {
         int32 masteryBonus = owner->GetTotalAuraModifier(SPELL_AURA_MOD_DAMAGE_FROM_MANA);
         float manaPct = 100.f * GetPower(POWER_MANA) / GetMaxPower(POWER_MANA);
@@ -9056,25 +9058,6 @@ void Unit::UpdateSpeed(UnitMoveType mtype)
         }
         default:
             break;
-    }
-
-    if (Creature* creature = ToCreature())
-    {
-        if (creature->HasUnitTypeMask(UNIT_MASK_MINION) && !creature->IsInCombat())
-        {
-            MovementGenerator* top = creature->GetMotionMaster()->topOrNull();
-            if (top && top->GetMovementGeneratorType() == FOLLOW_MOTION_TYPE)
-            {
-                Unit* followed = ASSERT_NOTNULL(dynamic_cast<AbstractFollower*>(top))->GetTarget();
-                if (followed && followed->GetGUID() == GetOwnerGUID() && !followed->IsInCombat())
-                {
-                    float ownerSpeed = followed->GetSpeedRate(mtype);
-                    if (speed < ownerSpeed || creature->IsWithinDist3d(followed, 10.0f))
-                        speed = ownerSpeed;
-                    speed *= std::min(std::max(1.0f, 0.75f + (GetDistance(followed) - PET_FOLLOW_DIST) * 0.05f), 1.3f);
-                }
-            }
-        }
     }
 
     // Apply strongest slow aura mod to speed
@@ -12758,38 +12741,13 @@ void Unit::UpdateObjectVisibility(bool forced)
 
 void Unit::SendMoveKnockBack(Player* player, float speedXY, float speedZ, float vcos, float vsin)
 {
-    ObjectGuid guid = GetGUID();
-    WorldPacket data(SMSG_MOVE_KNOCK_BACK, (1+8+4+4+4+4+4));
-    data.WriteBit(guid[0]);
-    data.WriteBit(guid[3]);
-    data.WriteBit(guid[6]);
-    data.WriteBit(guid[7]);
-    data.WriteBit(guid[2]);
-    data.WriteBit(guid[5]);
-    data.WriteBit(guid[1]);
-    data.WriteBit(guid[4]);
-
-    data.WriteByteSeq(guid[1]);
-
-    data << float(vsin);
-    data << uint32(0);
-
-    data.WriteByteSeq(guid[6]);
-    data.WriteByteSeq(guid[7]);
-
-    data << float(speedXY);
-
-    data.WriteByteSeq(guid[4]);
-    data.WriteByteSeq(guid[5]);
-    data.WriteByteSeq(guid[3]);
-
-    data << float(speedZ);
-    data << float(vcos);
-
-    data.WriteByteSeq(guid[2]);
-    data.WriteByteSeq(guid[0]);
-
-    player->SendDirectMessage(&data);
+    WorldPackets::Movement::MoveKnockBack moveKnockBack;
+    moveKnockBack.MoverGUID = GetGUID();
+    moveKnockBack.SequenceIndex = m_movementCounter++;
+    moveKnockBack.Speeds.HorzSpeed = speedXY;
+    moveKnockBack.Speeds.VertSpeed = speedZ;
+    moveKnockBack.Direction = Position(vcos, vsin);
+    player->SendDirectMessage(moveKnockBack.Write());
 }
 
 void Unit::KnockbackFrom(float x, float y, float speedXY, float speedZ)
@@ -13164,9 +13122,11 @@ uint32 Unit::GetModelForForm(ShapeshiftForm form, uint32 spellId) const
                     return 37174;
                 if (getRace() == RACE_WORGEN)
                     return 37173;
+                return 15374;
             case FORM_GHOSTWOLF:
                 if (HasAura(58135)) //! Glyph of Arctic Wolf
                     return 27312;
+                return 4613;
             default:
                 break;
         }
@@ -13293,15 +13253,18 @@ uint32 Unit::GetModelForTotem(PlayerTotemType totemType)
     return 0;
 }
 
-void Unit::JumpTo(float speedXY, float speedZ, bool forward)
+void Unit::JumpTo(float speedXY, float speedZ, bool forward, Optional<Position> dest)
 {
     float angle = forward ? 0 : float(M_PI);
+    if (dest)
+        angle += GetRelativeAngle(*dest);
+
     if (GetTypeId() == TYPEID_UNIT)
         GetMotionMaster()->MoveJumpTo(angle, speedXY, speedZ);
     else
     {
-        float vcos = std::cos(angle+GetOrientation());
-        float vsin = std::sin(angle+GetOrientation());
+        float vcos = std::cos(angle + GetOrientation());
+        float vsin = std::sin(angle + GetOrientation());
         SendMoveKnockBack(ToPlayer(), speedXY, -speedZ, vcos, vsin);
     }
 }

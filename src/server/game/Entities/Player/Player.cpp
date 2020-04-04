@@ -9516,10 +9516,8 @@ void Player::SendInitWorldStates(uint32 zoneid, uint32 areaid)
         // Wintergrasp
         case 4197:
             if (bf && bf->GetTypeId() == BATTLEFIELD_WG)
-            {
                 bf->FillInitialWorldStates(data);
-                break;
-            }
+            break;
         // Halls of Refection
         case 4820:
             if (instance && mapid == 668)
@@ -9530,7 +9528,6 @@ void Player::SendInitWorldStates(uint32 zoneid, uint32 areaid)
                 data << uint32(4882) << uint32(0);              // 10 WORLD_STATE_HOR_WAVE_COUNT
             }
             break;
-            // No break here, intended.
         default:
             data << uint32(0x914) << uint32(0x0);           // 7
             data << uint32(0x913) << uint32(0x0);           // 8
@@ -18668,7 +18665,7 @@ void Player::LoadPetsFromDB(PreparedQueryResult result)
         uint8 slot = fields[7].GetUInt8();
         uint32 petId = fields[0].GetUInt32();
 
-        if (slot < PET_SLOT_FIRST || slot > PET_SLOT_LAST)
+        if (slot > PET_SLOT_LAST)
         {
             TC_LOG_ERROR("sql.sql", "Player::LoadPetsFromDB: bad slot %u for pet %u!", slot, petId);
             continue;
@@ -24530,7 +24527,7 @@ void Player::UpdateVisibleGameobjectsOrSpellClicks()
             SpellClickInfoMapBounds clickPair = sObjectMgr->GetSpellClickInfoMapBounds(obj->GetEntry());
             for (SpellClickInfoContainer::const_iterator _itr = clickPair.first; _itr != clickPair.second; ++_itr)
             {
-                if (ConditionContainer const* conds = sConditionMgr->GetConditionsForSpellClickEvent(obj->GetEntry(), _itr->second.spellId))
+                if (sConditionMgr->GetConditionsForSpellClickEvent(obj->GetEntry(), _itr->second.spellId))
                 {
                     obj->BuildValuesUpdateBlockForPlayer(&udata, this);
                     break;
